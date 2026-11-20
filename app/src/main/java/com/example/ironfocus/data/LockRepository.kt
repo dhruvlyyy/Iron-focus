@@ -234,6 +234,48 @@ class LockRepository private constructor(appContext: Context) {
     }
 
     /**
+     * Used exclusively by the automated schedule engine.
+     * Starts a Strict Lock for [remainingWindowMillis], or extends an already-active lock
+     * if the scheduled window runs beyond the current remaining duration.
+     */
+    @Synchronized
+    fun startOrExtendForSchedule(remainingWindowMillis: Long): Boolean {
+        if (remainingWindowMillis < MIN_SCHEDULE_ACTIVATION_MILLIS) return false
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val bootCount = currentBootCount()
+
+        return if (isLockCurrentlyActive()) {
+            val currentRemaining = computeRemainingMillis(nowElapsed, bootCount)
+            val extraNeeded = remainingWindowMillis - currentRemaining
+            if (extraNeeded >= 15_000L) {
+                val newRemaining = currentRemaining + extraNeeded
+                val currentTotal = prefs.getLong(KEY_TOTAL_DURATION_MILLIS, currentRemaining)
+                val newTotal = maxOf(currentTotal + extraNeeded, newRemaining)
+                prefs.edit()
+                    .putLong(KEY_REMAINING_MILLIS, newRemaining)
+                    .putLong(KEY_TOTAL_DURATION_MILLIS, newTotal)
+                    .putLong(KEY_SNAPSHOT_ELAPSED_REALTIME, nowElapsed)
+                    .putInt(KEY_BOOT_COUNT, bootCount)
+                    .commit()
+                _state.value = readStateInternal()
+                true
+            } else {
+                false
+            }
+        } else {
+            prefs.edit()
+                .putBoolean(KEY_IS_LOCK_ACTIVE, true)
+                .putLong(KEY_TOTAL_DURATION_MILLIS, remainingWindowMillis)
+                .putLong(KEY_REMAINING_MILLIS, remainingWindowMillis)
+                .putLong(KEY_SNAPSHOT_ELAPSED_REALTIME, nowElapsed)
+                .putInt(KEY_BOOT_COUNT, bootCount)
+                .commit()
+            _state.value = readStateInternal()
+            true
+        }
+    }
+
+    /**
      * Toggle an app in pre-lock setup mode. While locked, can ONLY add packages, never remove.
      */
     @Synchronized
@@ -381,6 +423,7 @@ class LockRepository private constructor(appContext: Context) {
         private const val KEY_CUSTOM_DOMAINS = "custom_domains"
 
         const val MIN_DURATION_MILLIS = 60_000L
+        const val MIN_SCHEDULE_ACTIVATION_MILLIS = 5_000L
 
         @Volatile
         private var instance: LockRepository? = null

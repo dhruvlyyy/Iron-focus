@@ -12,6 +12,7 @@ import com.example.ironfocus.domain.FocusSchedule
 import com.example.ironfocus.domain.ScheduleTimeCalculator
 import com.example.ironfocus.domain.UrlMatcher
 import com.example.ironfocus.service.LockCountdownService
+import com.example.ironfocus.service.ScheduleActivator
 import com.example.ironfocus.service.ScheduleAlarmManager
 import com.example.ironfocus.system.PermissionsHelper
 import com.example.ironfocus.system.PermissionsStatus
@@ -103,19 +104,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Periodic 1-second UI monotonic refresh while lock is active
+        // Periodic 1-second UI monotonic refresh + 5-second schedule check while app is open
         viewModelScope.launch {
+            var ticks = 0
             while (isActive) {
+                if (ticks % 5 == 0) {
+                    ScheduleActivator.evaluateAndActivateNow(appContext)
+                }
                 if (repository.isLockCurrentlyActive() || _uiState.value.lockState.isLockActive) {
                     val refreshed = repository.refreshLiveState()
                     _uiState.update { it.copy(lockState = refreshed) }
                 }
+                ticks++
                 delay(1_000L)
             }
         }
 
         loadInstalledApps()
 
+        ScheduleActivator.evaluateAndActivateNow(appContext)
         if (repository.isLockCurrentlyActive()) {
             LockCountdownService.start(appContext)
         }
@@ -123,6 +130,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshOnResume() {
+        ScheduleActivator.evaluateAndActivateNow(appContext)
         val permissions = PermissionsHelper.checkAll(appContext)
         val lockState = repository.refreshLiveState()
         val schedules = scheduleRepository.getAll()
@@ -229,9 +237,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSchedule(schedule: FocusSchedule) {
         val sanitizedName = schedule.name.trim().ifEmpty { "Focus Block" }
         val sanitized = schedule.copy(name = sanitizedName)
+        scheduleRepository.clearActivatedWindowsForSchedule(sanitized.id)
         scheduleRepository.upsertSchedule(sanitized)
         if (sanitized.isEnabled) {
-            ScheduleAlarmManager.scheduleNextOccurrence(appContext, sanitized)
+            val activatedNow = ScheduleActivator.evaluateAndActivateNow(appContext)
+            if (!activatedNow) {
+                ScheduleAlarmManager.scheduleNextOccurrence(appContext, sanitized)
+            }
         } else {
             ScheduleAlarmManager.cancelSchedule(appContext, sanitized.id)
         }
@@ -242,7 +254,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!enabled && repository.isLockCurrentlyActive()) return
         val updated = scheduleRepository.setScheduleEnabled(scheduleId, enabled) ?: return
         if (updated.isEnabled) {
-            ScheduleAlarmManager.scheduleNextOccurrence(appContext, updated)
+            scheduleRepository.clearActivatedWindowsForSchedule(updated.id)
+            val activatedNow = ScheduleActivator.evaluateAndActivateNow(appContext)
+            if (!activatedNow) {
+                ScheduleAlarmManager.scheduleNextOccurrence(appContext, updated)
+            }
         } else {
             ScheduleAlarmManager.cancelSchedule(appContext, updated.id)
         }

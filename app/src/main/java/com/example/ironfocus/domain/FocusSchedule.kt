@@ -103,17 +103,26 @@ object ScheduleTimeCalculator {
         return raw.coerceAtLeast(1)
     }
 
+    data class ActiveScheduleWindow(
+        val schedule: FocusSchedule,
+        val windowStartMillis: Long,
+        val windowEndMillis: Long,
+        val remainingMillis: Long
+    )
+
     /**
-     * Computes the exact next future trigger epoch millis for [schedule] after [nowMillis].
+     * Computes the exact next future trigger epoch millis for [schedule] after [nowMillis] + [minLeadMillis].
      * Returns null if disabled or no days are selected.
      */
     fun computeNextTriggerTimeMillis(
         schedule: FocusSchedule,
         nowMillis: Long = System.currentTimeMillis(),
-        timeZone: TimeZone = TimeZone.getDefault()
+        timeZone: TimeZone = TimeZone.getDefault(),
+        minLeadMillis: Long = 0L
     ): Long? {
         if (!schedule.isEnabled || schedule.daysOfWeek.isEmpty()) return null
 
+        val thresholdMillis = nowMillis + minLeadMillis.coerceAtLeast(0L)
         val candidate = Calendar.getInstance(timeZone).apply {
             timeInMillis = nowMillis
             set(Calendar.SECOND, 0)
@@ -128,7 +137,7 @@ object ScheduleTimeCalculator {
                 add(Calendar.DAY_OF_YEAR, dayOffset)
             }
             val isoDay = calendarDayToIso(checkCal.get(Calendar.DAY_OF_WEEK))
-            if (isoDay in schedule.daysOfWeek && checkCal.timeInMillis > nowMillis) {
+            if (isoDay in schedule.daysOfWeek && checkCal.timeInMillis > thresholdMillis) {
                 return checkCal.timeInMillis
             }
         }
@@ -136,16 +145,15 @@ object ScheduleTimeCalculator {
     }
 
     /**
-     * Checks if [nowMillis] currently falls INSIDE an active occurrence of [schedule]
-     * (including overnight schedules that began yesterday).
-     * Returns remaining millis until scheduled end, or 0L if outside the window.
+     * Returns the currently active [ActiveScheduleWindow] if [nowMillis] falls inside
+     * an enabled occurrence of [schedule] (including overnight schedules started yesterday).
      */
-    fun computeCurrentlyActiveRemainingMillis(
+    fun findActiveWindow(
         schedule: FocusSchedule,
         nowMillis: Long = System.currentTimeMillis(),
         timeZone: TimeZone = TimeZone.getDefault()
-    ): Long {
-        if (!schedule.isEnabled || schedule.daysOfWeek.isEmpty()) return 0L
+    ): ActiveScheduleWindow? {
+        if (!schedule.isEnabled || schedule.daysOfWeek.isEmpty()) return null
 
         val durationMs = schedule.durationMillis
         val base = Calendar.getInstance(timeZone).apply {
@@ -166,11 +174,29 @@ object ScheduleTimeCalculator {
                 val startMs = startCal.timeInMillis
                 val endMs = startMs + durationMs
                 if (nowMillis in startMs until endMs) {
-                    return (endMs - nowMillis).coerceAtLeast(0L)
+                    return ActiveScheduleWindow(
+                        schedule = schedule,
+                        windowStartMillis = startMs,
+                        windowEndMillis = endMs,
+                        remainingMillis = (endMs - nowMillis).coerceAtLeast(0L)
+                    )
                 }
             }
         }
-        return 0L
+        return null
+    }
+
+    /**
+     * Checks if [nowMillis] currently falls INSIDE an active occurrence of [schedule]
+     * (including overnight schedules that began yesterday).
+     * Returns remaining millis until scheduled end, or 0L if outside the window.
+     */
+    fun computeCurrentlyActiveRemainingMillis(
+        schedule: FocusSchedule,
+        nowMillis: Long = System.currentTimeMillis(),
+        timeZone: TimeZone = TimeZone.getDefault()
+    ): Long {
+        return findActiveWindow(schedule, nowMillis, timeZone)?.remainingMillis ?: 0L
     }
 
     fun formatTime12h(hour: Int, minute: Int): String {

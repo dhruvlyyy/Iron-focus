@@ -76,8 +76,37 @@ class ScheduleRepository private constructor(appContext: Context) {
         val removed = current.removeAll { it.id == id }
         if (removed) {
             saveSchedulesInternal(sortSchedules(current))
+            clearActivatedWindowsForSchedule(id)
         }
         return removed
+    }
+
+    @Synchronized
+    fun hasActivatedWindow(scheduleId: String, windowStartMillis: Long): Boolean {
+        val token = "$scheduleId:$windowStartMillis"
+        val stored = prefs.getStringSet(KEY_ACTIVATED_WINDOWS, emptySet()) ?: emptySet()
+        return token in stored
+    }
+
+    @Synchronized
+    fun markWindowActivated(scheduleId: String, windowStartMillis: Long) {
+        val now = System.currentTimeMillis()
+        val cutoff = now - ACTIVATED_WINDOW_RETENTION_MS
+        val existing = prefs.getStringSet(KEY_ACTIVATED_WINDOWS, emptySet()) ?: emptySet()
+        val pruned = existing.filterTo(mutableSetOf()) { entry ->
+            val ts = entry.substringAfterLast(':', missingDelimiterValue = "").toLongOrNull()
+            ts != null && ts >= cutoff
+        }
+        pruned.add("$scheduleId:$windowStartMillis")
+        prefs.edit().putStringSet(KEY_ACTIVATED_WINDOWS, pruned).commit()
+    }
+
+    @Synchronized
+    fun clearActivatedWindowsForSchedule(scheduleId: String) {
+        val existing = prefs.getStringSet(KEY_ACTIVATED_WINDOWS, emptySet()) ?: return
+        val prefix = "$scheduleId:"
+        val filtered = existing.filterNotTo(mutableSetOf()) { it.startsWith(prefix) }
+        prefs.edit().putStringSet(KEY_ACTIVATED_WINDOWS, filtered).commit()
     }
 
     private fun sortSchedules(list: List<FocusSchedule>): List<FocusSchedule> {
@@ -145,6 +174,8 @@ class ScheduleRepository private constructor(appContext: Context) {
     companion object {
         private const val PREFS_NAME = "ironfocus_strict_vault"
         private const val KEY_SCHEDULES_JSON = "focus_schedules_json"
+        private const val KEY_ACTIVATED_WINDOWS = "activated_schedule_windows"
+        private const val ACTIVATED_WINDOW_RETENTION_MS = 14L * 24L * 60L * 60L * 1000L
 
         @Volatile
         private var instance: ScheduleRepository? = null

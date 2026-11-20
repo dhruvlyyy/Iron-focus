@@ -5,16 +5,15 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.example.ironfocus.data.LockRepository
-import com.example.ironfocus.data.ScheduleRepository
-import com.example.ironfocus.domain.ScheduleTimeCalculator
 import com.example.ironfocus.service.LockCountdownService
+import com.example.ironfocus.service.ScheduleActivator
 import com.example.ironfocus.service.ScheduleAlarmManager
 
 /**
- * Reboot & System-Event Survival Receiver (Direct Boot + Standard Boot).
+ * Reboot, App-Update & System-Event Survival Receiver (Direct Boot + Standard Boot).
  * 1. Re-anchors monotonic uptime snapshot after a reboot and restarts LockCountdownService.
- * 2. Re-arms all weekly AlarmManager focus schedules (since Android clears alarms on reboot).
- * 3. If the device boots into an already-active scheduled focus window, engages Strict Lock.
+ * 2. Re-arms all weekly AlarmManager focus schedules after reboot, timezone change, or app update.
+ * 3. Immediately engages Strict Lock if the current time is already inside an enabled schedule window.
  */
 class BootReceiver : BroadcastReceiver() {
 
@@ -24,12 +23,14 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_LOCKED_BOOT_COMPLETED,
             "android.intent.action.QUICKBOOT_POWERON",
+            Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIMEZONE_CHANGED,
             AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
         )
         if (action !in validActions) return
 
-        val lockRepo = LockRepository.getInstance(context)
+        val appCtx = context.applicationContext
+        val lockRepo = LockRepository.getInstance(appCtx)
         val isBootEvent = action == Intent.ACTION_BOOT_COMPLETED ||
             action == Intent.ACTION_LOCKED_BOOT_COMPLETED ||
             action == "android.intent.action.QUICKBOOT_POWERON"
@@ -41,20 +42,11 @@ class BootReceiver : BroadcastReceiver() {
         }
 
         if (remaining > 0L) {
-            LockCountdownService.start(context)
-        } else if (isBootEvent) {
-            // Check if any enabled schedule is currently mid-window after boot
-            val schedules = ScheduleRepository.getInstance(context).getAll()
-            val maxActiveRemaining = schedules.maxOfOrNull {
-                ScheduleTimeCalculator.computeCurrentlyActiveRemainingMillis(it)
-            } ?: 0L
-            if (maxActiveRemaining >= LockRepository.MIN_DURATION_MILLIS) {
-                lockRepo.startLock(maxActiveRemaining)
-                LockCountdownService.start(context)
-            }
+            LockCountdownService.start(appCtx)
         }
 
-        // Always re-arm weekly recurring AlarmManager triggers
-        ScheduleAlarmManager.rescheduleAll(context)
+        // Check if any enabled schedule is active right now and re-arm all upcoming alarms
+        ScheduleActivator.evaluateAndActivateNow(appCtx)
+        ScheduleAlarmManager.rescheduleAll(appCtx)
     }
 }

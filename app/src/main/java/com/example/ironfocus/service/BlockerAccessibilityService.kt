@@ -2,6 +2,8 @@ package com.example.ironfocus.service
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -11,19 +13,35 @@ import com.example.ironfocus.domain.BrowserRegistry
 import com.example.ironfocus.domain.TamperGuardConfig
 import com.example.ironfocus.domain.UrlMatcher
 import com.example.ironfocus.ui.BlockedOverlayActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 /**
- * Multi-Window, Multi-Browser Blocking Engine + Settings Anti-Tamper Guard.
+ * Multi-Window, Multi-Browser Blocking Engine + Settings Anti-Tamper Guard + Schedule Watchdog.
  *
  * Inspects all active windows via getWindows() (falling back to rootInActiveWindow)
  * to prevent Split-Screen or Floating Window bypasses.
+ *
+ * Also runs a Doze-immune schedule evaluator & 15-second watchdog so automated weekly schedules
+ * activate reliably even when AlarmManager is restricted or the user is already inside a blocked app.
  */
 class BlockerAccessibilityService : AccessibilityService() {
 
     private lateinit var repository: LockRepository
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var watchdogJob: Job? = null
+
     private var protectedPackages: Set<String> = emptySet()
     private var installedBrowsers: Set<String> = emptySet()
     private var lastBrowserCacheRefreshElapsed: Long = 0L
+    private var lastSchedulePollElapsed: Long = 0L
     private var lastTriggerElapsed: Long = 0L
 
     override fun onServiceConnected() {
@@ -31,13 +49,58 @@ class BlockerAccessibilityService : AccessibilityService() {
         repository = LockRepository.getInstance(applicationContext)
         refreshPackageCaches(force = true)
 
-        // Ensure foreground timer service is alive if a lock is active
+        // Immediately check if we are already inside an enabled schedule window
+        ScheduleActivator.evaluateAndActivateNow(applicationContext)
+        ScheduleAlarmManager.rescheduleAll(applicationContext)
+
         if (repository.isLockCurrentlyActive()) {
             LockCountdownService.start(applicationContext)
+        }
+
+        startScheduleWatchdog()
+    }
+
+    private fun startScheduleWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = serviceScope.launch {
+            var tickCount = 0
+            while (isActive) {
+                try {
+                    val newlyActivated = ScheduleActivator.evaluateAndActivateNow(applicationContext)
+                    val state = repository.refreshLiveState()
+                    if (state.isLockActive && state.remainingMillis > 0L) {
+                        // Persist monotonic checkpoint every ~30s as backup to LockCountdownService
+                        if (tickCount % 2 == 0) {
+                            repository.persistCheckpoint()
+                        }
+                        // If a schedule just fired (or user is sitting inside a blocked app), enforce now
+                        if (newlyActivated || tickCount % 2 == 0) {
+                            mainHandler.post { enforceBlockingOnCurrentWindows(eventPackageName = null) }
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+                tickCount++
+                delay(WATCHDOG_INTERVAL_MS)
+            }
         }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (!::repository.isInitialized) {
+            repository = LockRepository.getInstance(applicationContext)
+        }
+
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (nowElapsed - lastSchedulePollElapsed >= EVENT_SCHEDULE_POLL_INTERVAL_MS) {
+            lastSchedulePollElapsed = nowElapsed
+            ScheduleActivator.evaluateAndActivateNow(applicationContext)
+        }
+
+        enforceBlockingOnCurrentWindows(eventPackageName = event?.packageName?.toString())
+    }
+
+    private fun enforceBlockingOnCurrentWindows(eventPackageName: String?) {
         if (!::repository.isInitialized) {
             repository = LockRepository.getInstance(applicationContext)
         }
@@ -49,73 +112,72 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         refreshPackageCaches(force = false)
 
-        // Collect all active window roots (multi-window / split-screen / floating window support)
         val windowRoots = collectActiveWindowRoots()
         if (windowRoots.isEmpty()) {
-            // Fallback check using event.packageName if window roots are momentarily unavailable
-            val eventPkg = event?.packageName?.toString()
-            if (!eventPkg.isNullOrBlank() &&
-                eventPkg !in protectedPackages &&
-                eventPkg in state.blockedPackages
+            if (!eventPackageName.isNullOrBlank() &&
+                eventPackageName !in protectedPackages &&
+                eventPackageName in state.blockedPackages
             ) {
-                triggerAppBlock(eventPkg)
+                triggerAppBlock(eventPackageName)
             }
             return
         }
 
-        try {
-            // Pass 1: App Blocking across ALL active windows
-            for (root in windowRoots) {
-                val pkg = root.packageName?.toString() ?: continue
-                if (pkg in protectedPackages) continue
-                if (pkg in state.blockedPackages) {
-                    triggerAppBlock(pkg)
+        // Pass 1: App Blocking across ALL active windows
+        for (root in windowRoots) {
+            val pkg = root.packageName?.toString() ?: continue
+            if (pkg in protectedPackages) continue
+            if (pkg in state.blockedPackages) {
+                triggerAppBlock(pkg)
+                return
+            }
+        }
+
+        // Pass 2: Settings & Anti-Tamper Guard across ALL active windows
+        for (root in windowRoots) {
+            val pkg = root.packageName?.toString() ?: continue
+            if (pkg == applicationContext.packageName) continue
+            if (TamperGuardConfig.isGuardedSettingsOrSecurityPackage(pkg)) {
+                val matchedKeyword = scanWindowForTamperKeywords(root)
+                if (matchedKeyword != null) {
+                    triggerTamperBlock(matchedKeyword)
                     return
                 }
             }
+        }
 
-            // Pass 2: Settings & Anti-Tamper Guard across ALL active windows
+        // Pass 3: Multi-Browser Website Blocking across ALL active windows
+        if (state.blockedDomains.isNotEmpty()) {
             for (root in windowRoots) {
                 val pkg = root.packageName?.toString() ?: continue
-                if (pkg == applicationContext.packageName) continue
-                if (TamperGuardConfig.isGuardedSettingsOrSecurityPackage(pkg)) {
-                    val matchedKeyword = scanWindowForTamperKeywords(root)
-                    if (matchedKeyword != null) {
-                        triggerTamperBlock(matchedKeyword)
+                if (pkg in protectedPackages) continue
+
+                val isKnownBrowser = BrowserRegistry.KNOWN_BROWSER_URL_BAR_IDS.containsKey(pkg)
+                val isFallbackBrowser = pkg in installedBrowsers
+
+                if (isKnownBrowser || isFallbackBrowser) {
+                    val matchedDomain = inspectBrowserWindowForBlockedUrl(
+                        root = root,
+                        packageName = pkg,
+                        blockedDomains = state.blockedDomains
+                    )
+                    if (matchedDomain != null) {
+                        triggerWebsiteBlock(matchedDomain)
                         return
                     }
                 }
             }
-
-            // Pass 3: Multi-Browser Website Blocking across ALL active windows
-            if (state.blockedDomains.isNotEmpty()) {
-                for (root in windowRoots) {
-                    val pkg = root.packageName?.toString() ?: continue
-                    if (pkg in protectedPackages) continue
-
-                    val isKnownBrowser = BrowserRegistry.KNOWN_BROWSER_URL_BAR_IDS.containsKey(pkg)
-                    val isFallbackBrowser = pkg in installedBrowsers
-
-                    if (isKnownBrowser || isFallbackBrowser) {
-                        val matchedDomain = inspectBrowserWindowForBlockedUrl(
-                            root = root,
-                            packageName = pkg,
-                            blockedDomains = state.blockedDomains
-                        )
-                        if (matchedDomain != null) {
-                            triggerWebsiteBlock(matchedDomain)
-                            return
-                        }
-                    }
-                }
-            }
-        } finally {
-            // No manual recycle needed on modern Android; safe guard prevents leaks on older APIs
         }
     }
 
     override fun onInterrupt() {
         // No-op
+    }
+
+    override fun onDestroy() {
+        watchdogJob?.cancel()
+        serviceScope.cancel()
+        super.onDestroy()
     }
 
     private fun collectActiveWindowRoots(): List<AccessibilityNodeInfo> {
@@ -145,7 +207,6 @@ class BlockerAccessibilityService : AccessibilityService() {
         packageName: String,
         blockedDomains: Set<String>
     ): String? {
-        // 1. Direct known browser URL bar lookup by exact resource ID
         val knownUrlBarId = BrowserRegistry.KNOWN_BROWSER_URL_BAR_IDS[packageName]
         if (knownUrlBarId != null) {
             val nodes = try {
@@ -159,13 +220,11 @@ class BlockerAccessibilityService : AccessibilityService() {
                         ?: UrlMatcher.findMatchingBlockedDomain(node.contentDescription, blockedDomains)
                     if (match != null) return match
                 }
-                // Found known URL bar with text, no blocked domain -> still check fallback only if empty
                 val hasText = nodes.any { !it.text.isNullOrBlank() }
                 if (hasText) return null
             }
         }
 
-        // 2. Universal Browser Fallback: traverse top-level hierarchy for EditText or URL-like resource IDs
         return scanUniversalBrowserUrlNodes(root, blockedDomains)
     }
 
@@ -292,6 +351,8 @@ class BlockerAccessibilityService : AccessibilityService() {
     }
 
     companion object {
+        private const val WATCHDOG_INTERVAL_MS = 15_000L
+        private const val EVENT_SCHEDULE_POLL_INTERVAL_MS = 2_000L
         private const val TRIGGER_COOLDOWN_MS = 650L
         private const val PACKAGE_CACHE_TTL_MS = 60_000L
         private const val MAX_URL_SCAN_NODES = 180
