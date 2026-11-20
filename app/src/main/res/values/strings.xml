@@ -1,0 +1,116 @@
+<resources>
+    <string name="app_name">IronFocus</string>
+
+    <!-- System Service Descriptions -->
+    <string name="accessibility_service_summary">Strict app, website, and anti-tamper blocker</string>
+    <string name="accessibility_service_description">IronFocus uses Accessibility Service solely on-device to detect blocked apps, blocked browser URLs across installed browsers, and prevent settings tampering during an active Strict Lock session.</string>
+    <string name="device_admin_label">IronFocus Anti-Uninstall Guard</string>
+    <string name="device_admin_description">Prevents IronFocus from being uninstalled while a Strict Lock session is active.</string>
+    <string name="device_admin_disable_warning">IronFocus Strict Lock is active. Device Administrator protection cannot be safely disabled until your lock timer reaches zero.</string>
+
+    <!-- Notification Strings -->
+    <string name="notification_channel_name">Strict Lock Timer</string>
+    <string name="notification_channel_description">Persistent countdown and tamper-proof timer persistence while IronFocus Strict Lock is active.</string>
+    <string name="notification_title_active">IronFocus Strict Lock Active</string>
+    <string name="notification_title_completed">Strict Lock Completed</string>
+    <string name="notification_body_completed">Your focus lock session has finished. All blocked apps and websites are now accessible.</string>
+
+    <!-- Navigation & Screen Titles -->
+    <string name="nav_dashboard">Control</string>
+    <string name="nav_schedules">Schedules</string>
+    <string name="nav_apps">Apps</string>
+    <string name="nav_websites">Websites</string>
+    <string name="tagline_strict">STRICT FOCUS VAULT</string>
+
+    <!-- Schedules Screen -->
+    <string name="schedules_title">Auto Schedules</string>
+    <string name="schedules_subtitle">Automatically engage Strict Lock at your exact start &amp; end times every week.</string>
+    <string name="schedules_new_button">New Schedule</string>
+    <string name="schedules_edit_title">Edit Schedule</string>
+    <string name="schedules_create_title">Create Schedule</string>
+    <string name="schedules_name_label">Schedule Name</string>
+    <string name="schedules_name_placeholder">e.g. Deep Work, Sleep Guard</string>
+    <string name="schedules_days_label">ACTIVE DAYS</string>
+    <string name="schedules_time_window_label">LOCK WINDOW</string>
+    <string name="schedules_start_time">START</string>
+    <string name="schedules_end_time">END</string>
+    <string name="schedules_repeat_weekly_title">Repeat Every Week</string>
+    <string name="schedules_repeat_weekly_desc">Automatically triggers every week on the selected days</string>
+    <string name="schedules_badge_weekly">WEEKLY</string>
+    <string name="schedules_badge_once">ONE-TIME</string>
+    <string name="schedules_save">Save Schedule</string>
+    <string name="schedules_exact_alarm_banner">Enable Alarms &amp; Reminders permission for minute-exact automatic lock starts.</string>
+    <string name="schedules_empty_title">No Schedules Armed</string>
+    <string name="schedules_empty_desc">Automate your focus rituals. Pick any days and start/end window, or tap a template below.</string>
+    <string name="schedules_templates_header">QUICK TEMPLATES</string>
+
+    <!-- Permissions Checklist -->
+    <string name="permissions_title">System Armor</string>
+    <string name="permissions_subtitle">Accessibility Service and Device Administrator are required before engaging Strict Lock.</string>
+    <string name="status_enabled">Enabled</string>
+    <string name="status_missing">Missing</string>
+    <string name="action_enable">Enable</string>
+    <string name="action_configure">Open</string>
+    <string name="perm_accessibility_title">Accessibility Service</string>
+    <string name="perm_accessibility_desc">Required for blocking apps, websites, and settings tampering</string>
+    <string name="perm_device_admin_title">Device Administrator</string>
+    <string name="perm_device_admin_desc">Required to disable uninstall during active sessions</string>
+    <string name="perm_battery_title">Ignore Battery Optimizations</string>
+    <string name="perm_battery_desc">Keeps the tamper-proof countdown service alive</string>
+    <string name="perm_overlay_title">Display Over Other Apps</string>
+    <string name="perm_overlay_desc">Ensures instant full-screen lock shield overlays</string>
+    <string name="perm_badge_required">REQUIRED</string>
+    <string name="perm_badge_recommended">RECOMMENDED</string>
+
+    <!-- Duration Picker -->
+    <string name="duration_title">Lock Duration</string>
+    <string name="duration_minimum_note">Minimum 1 minute • Tracked via tamper-proof monotonic uptime</string>
+    <string name="label_days">DAYS</string>
+    <string name="label_hours">HOURS</string>
+    <string name="label_minutes">MINS</string>
+
+    <!-- Confirmation & Strict Lock -->
+    <string name="btn_engage_lock">Engage Strict Lock</string>
+    <string name="lock_prereq_warning">Activate Accessibility Service and Device Administrator to unlock Strict Mode.</string>
+    <string name="lock_empty_targets_warning">Select at least one app or website to block.</string>
+    <string name="confirm_dialog_title">Engage Irreversible Lock?</string>
+    <string name="confirm_dialog_message">Once started, you cannot stop, pause, edit, or uninstall until the timer hits zero.</string>
+    <string name="confirm_dialog_confirm">Lock Now</string>
+    <string name="confirm_dialog_cancel">Cancel</string>
+
+    <!-- Active Lock Screen -->
+    <string name="active_lock_badge">STRICT LOCK ACTIVE</string>
+    <string name="active_lock_tamper_note">Tamper guard &amp; anti-uninstall armed. Timer cannot be stopped or shortened.</string>
+    <string name="action_extend_timer">Extend Timer</string>
+    <string name="action_add_apps">Add Apps</string>
+    <string name="action_add_website">Add Website</string>
+    <string name="locked_apps_header">Locked Apps</string>
+    <string name="locked_websites_header">Locked Websites</string>
+    <string name="extend_dialog_title">Extend Lock Timer</string>
+    <string name="extend_dialog_subtitle">Add time to your current lock. Duration can only increase.</string>
+    <string name="extend_dialog_confirm">Add Time</string>
+
+    <!-- Apps Screen -->
+    <string name="apps_search_placeholder">Search installed apps…</string>
+    <string name="apps_filter_all">All</string>
+    <string name="apps_filter_selected">Selected</string>
+    <string name="apps_protected_notice">IronFocus, Phone/Dialer, and System UI are automatically protected and cannot be blocked.</string>
+    <string name="apps_empty_search">No matching apps found.</string>
+
+    <!-- Websites Screen -->
+    <string name="websites_quick_header">Quick Toggles</string>
+    <string name="websites_custom_header">Custom Domains</string>
+    <string name="websites_input_placeholder">e.g. https://www.reddit.com/</string>
+    <string name="websites_add_button">Add</string>
+    <string name="websites_invalid_domain">Enter a valid domain such as reddit.com or youtube.com</string>
+    <string name="websites_empty_custom">No custom domains added yet.</string>
+    <string name="websites_multi_browser_note">Monitored across Chrome, Brave, Edge, Firefox, Samsung Internet, Opera, DuckDuckGo, Vivaldi, and fallback browsers.</string>
+
+    <!-- Blocked Overlay -->
+    <string name="overlay_title_app">Application Locked</string>
+    <string name="overlay_title_website">Website Blocked</string>
+    <string name="overlay_title_tamper">Tamper Guard Triggered</string>
+    <string name="overlay_subtitle_tamper">System settings and protection controls are inaccessible while Strict Lock is active.</string>
+    <string name="overlay_remaining_label">REMAINING LOCK TIME</string>
+    <string name="overlay_return_home">Return to Home</string>
+</resources>
